@@ -8,8 +8,11 @@ This project follows Clean Architecture principles with clear separation of conc
 
 ```
 example-api-template/
-├── cmd/server/               # Entry point
-│   └── main.go              # Application bootstrap with DI
+├── cmd/
+│   ├── server/              # HTTP API server
+│   │   └── main.go          # Server application with HTTP handlers
+│   └── consumer/            # Message queue consumer
+│       └── main.go          # Consumer application for processing events
 ├── internal/
 │   ├── domain/              # Business entities
 │   │   └── example.go       # Core domain model
@@ -20,9 +23,13 @@ example-api-template/
 │   │   └── example_service.go        # Business rules & validation
 │   ├── usecase/             # Application orchestration
 │   │   └── example_usecase.go        # Use cases with external integration
-│   ├── transport/http/      # HTTP presentation layer
-│   │   ├── example_handler.go        # Echo handlers
-│   │   └── dto.go                    # Request/Response DTOs
+│   ├── transport/
+│   │   ├── http/            # HTTP presentation layer
+│   │   │   ├── example_handler.go    # Echo handlers
+│   │   │   └── dto.go                # Request/Response DTOs
+│   │   └── mq/              # Message Queue transport layer
+│   │       ├── example_producer.go   # Event publishing
+│   │       └── example_consumer.go   # Event consumption
 │   └── config/              # Configuration management
 │       └── config.go        # Environment-based config
 ├── pkg/
@@ -41,6 +48,7 @@ example-api-template/
 - **CRUD Operations**: Complete Create, Read, Update, Delete operations for Example entities
 - **Business Logic**: Name validation, email uniqueness, age restrictions, corporate/VIP domain rules
 - **External API Integration**: Validation, enrichment, and notification services
+- **Message Queue Integration**: Asynchronous event publishing and consumption with RabbitMQ
 - **Pagination**: Efficient list operations with limit/offset pagination
 
 ### Technical Features
@@ -50,8 +58,9 @@ example-api-template/
 - **Error Handling**: Comprehensive error types with proper HTTP status codes
 - **Configuration**: Environment-based configuration with validation
 - **Testing**: Extensive unit tests with mocks and fixtures
-- **Graceful Shutdown**: Proper server lifecycle management
+- **Graceful Shutdown**: Proper server and message queue lifecycle management
 - **Middleware**: CORS, rate limiting, security headers, request logging
+- **Event-Driven Architecture**: Asynchronous event processing with reliable message delivery
 
 ## 📋 API Endpoints
 
@@ -67,11 +76,70 @@ example-api-template/
 ### Health & Monitoring
 - `GET /api/v1/health` - Health check endpoint
 
+## 📨 Message Queue Events
+
+The service publishes events to RabbitMQ for asynchronous processing:
+
+### Event Types
+- **example.created** - Published when a new example is created
+- **example.updated** - Published when an example is updated
+- **example.deleted** - Published when an example is deleted
+
+### Event Structure
+```json
+{
+  "id": "evt_1640995200000000000",
+  "type": "example.created",
+  "timestamp": "2023-12-01T10:00:00Z",
+  "data": {
+    "id": "ex_joh_8",
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "age": 30,
+    "created_at": "2023-12-01T10:00:00Z",
+    "updated_at": "2023-12-01T10:00:00Z",
+    "external_data": {
+      "external_id": "ext_ex_joh_8",
+      "metadata": {
+        "source": "mock_api",
+        "version": "1.0"
+      },
+      "score": 0.85
+    }
+  },
+  "metadata": {
+    "source": "example-api",
+    "version": "1.0",
+    "user_id": "system",
+    "trace_id": "abc123"
+  }
+}
+```
+
+### Consumer Implementation
+The service includes both embedded and standalone consumer options:
+
+#### Embedded Consumer (Default)
+- Runs alongside the HTTP server
+- Uses mock implementation by default
+- Good for development and simple deployments
+
+#### Standalone Consumer (`cmd/consumer/main.go`)
+- Runs as a separate application
+- Dedicated for processing message queue events
+- Supports independent scaling and deployment
+- Includes the same event handler capabilities:
+  - Logs all events for audit purposes
+  - Can be extended to integrate with external systems
+  - Supports error handling and retry logic
+  - Processes events asynchronously
+
 ## 🛠️ Getting Started
 
 ### Prerequisites
 - Go 1.21 or higher
 - Git
+- RabbitMQ (optional - mock implementation available)
 
 ### Installation
 
@@ -86,12 +154,33 @@ example-api-template/
    go mod tidy
    ```
 
-3. **Run the application**
+3. **Optional: Start RabbitMQ** (skip if using mock)
+   ```bash
+   # Using Docker
+   docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+   
+   # Or using Homebrew on macOS
+   brew install rabbitmq
+   brew services start rabbitmq
+   ```
+
+4. **Run the applications**
+   
+   **Option A: Run server only (with mock consumer)**
    ```bash
    go run cmd/server/main.go
    ```
+   
+   **Option B: Run server and consumer separately**
+   ```bash
+   # Terminal 1: Start the HTTP API server
+   go run cmd/server/main.go
+   
+   # Terminal 2: Start the message queue consumer
+   go run cmd/consumer/main.go
+   ```
 
-The server will start on `http://localhost:8080`
+The server will start on `http://localhost:8080` and the consumer will process events from the message queue
 
 ### Configuration
 
@@ -123,6 +212,20 @@ EXTERNAL_API_ENABLE_MOCK=true        # Use mock external API (default: true)
 EXTERNAL_API_MOCK_DELAY=100ms        # Mock API delay (default: 100ms)
 EXTERNAL_API_MOCK_SHOULD_FAIL=false  # Make mock API fail (default: false)
 EXTERNAL_API_TIMEOUT=30s             # External API timeout (default: 30s)
+```
+
+#### Message Queue Configuration
+```bash
+MQ_URL=amqp://guest:guest@localhost:5672/  # RabbitMQ connection URL (default: localhost)
+MQ_EXCHANGE_NAME=examples                   # Exchange name (default: examples)
+MQ_QUEUE_NAME=example-events               # Queue name (default: example-events)
+MQ_ROUTING_PREFIX=example                   # Routing key prefix (default: example)
+MQ_ROUTING_KEYS=example.created,example.updated,example.deleted  # Routing keys
+MQ_ENABLE_PRODUCER=true                     # Enable message producer (default: true)
+MQ_ENABLE_CONSUMER=true                     # Enable message consumer (default: true)
+MQ_ENABLE_MOCK=true                         # Use mock MQ (default: true)
+MQ_PREFETCH_COUNT=10                        # Consumer prefetch count (default: 10)
+MQ_DURABLE=true                             # Make queues durable (default: true)
 ```
 
 #### Logging Configuration
@@ -274,25 +377,84 @@ The application implements several business rules:
 - [ ] Set `LOG_FORMAT=json`
 - [ ] Configure proper database connection
 - [ ] Set up external API credentials
+- [ ] Configure RabbitMQ cluster
+- [ ] Set `MQ_ENABLE_MOCK=false`
+- [ ] Deploy consumer applications separately
 - [ ] Configure monitoring and alerting
 - [ ] Set up health checks
 - [ ] Configure load balancer
 - [ ] Set up log aggregation
 
 ### Docker Support
+
+**Server Dockerfile:**
 ```dockerfile
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o main cmd/server/main.go
+RUN go build -o server cmd/server/main.go
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-COPY --from=builder /app/main .
-CMD ["./main"]
+COPY --from=builder /app/server .
+CMD ["./server"]
+```
+
+**Consumer Dockerfile:**
+```dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o consumer cmd/consumer/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/consumer .
+CMD ["./consumer"]
+```
+
+**Docker Compose:**
+```yaml
+version: '3.8'
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8080:8080"
+    environment:
+      - MQ_ENABLE_MOCK=false
+      - MQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    environment:
+      - MQ_ENABLE_MOCK=false
+      - MQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+    deploy:
+      replicas: 2
 ```
 
 ### Health Check
@@ -302,6 +464,7 @@ curl http://localhost:8080/api/v1/health
 
 # Environment variable health check
 HEALTH_CHECK=true go run cmd/server/main.go
+HEALTH_CHECK=true go run cmd/consumer/main.go
 ```
 
 ## 📊 Monitoring
@@ -346,4 +509,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Echo web framework
 - Zap structured logging
 - Testify testing toolkit
+- Go community for excellent tooling and libraries
+
 - Go community for excellent tooling and libraries

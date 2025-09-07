@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/go-playground/validator/v10 v10.16.0
 	github.com/labstack/echo/v4 v4.11.4
+	github.com/rabbitmq/amqp091-go v1.9.0
 	github.com/stretchr/testify v1.8.4
 	go.uber.org/zap v1.26.0
 )

@@ -13,6 +13,7 @@ import (
 	"example-api-template/internal/repository"
 	"example-api-template/internal/service"
 	httpTransport "example-api-template/internal/transport/http"
+	"example-api-template/internal/transport/mq"
 	"example-api-template/internal/usecase"
 	"example-api-template/pkg/logger"
 	"example-api-template/pkg/validator"
@@ -60,7 +61,7 @@ func main() {
 	deps.Handler.RegisterRoutes(e)
 
 	// Start server
-	startServer(e, cfg, appLogger)
+	startServer(e, cfg, appLogger, deps)
 }
 
 // Dependencies holds all application dependencies
@@ -71,6 +72,7 @@ type Dependencies struct {
 	UseCase     usecase.ExampleUseCase
 	Validator   validator.Validator
 	Handler     *httpTransport.ExampleHandler
+	Producer    mq.ExampleProducer
 }
 
 // initializeDependencies initializes all application dependencies
@@ -115,6 +117,38 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 	// Initialize HTTP handler
 	handler := httpTransport.NewExampleHandler(uc, validator, logger.Logger)
 
+	// Initialize message queue producer only (consumer runs separately)
+	var producer mq.ExampleProducer
+
+	if cfg.MessageQueue.EnableMock {
+		// Use mock implementation
+		producer = mq.NewMockProducer(logger.Logger)
+		logger.Info("Using mock message queue producer")
+	} else {
+		// Use real RabbitMQ implementation
+		if cfg.MessageQueue.EnableProducer {
+			producerConfig := &mq.RabbitMQProducerConfig{
+				URL:           cfg.MessageQueue.URL,
+				ExchangeName:  cfg.MessageQueue.ExchangeName,
+				RoutingPrefix: cfg.MessageQueue.RoutingPrefix,
+				Durable:       cfg.MessageQueue.Durable,
+				AutoDelete:    cfg.MessageQueue.AutoDelete,
+			}
+
+			var err error
+			producer, err = mq.NewRabbitMQProducer(producerConfig, logger.Logger)
+			if err != nil {
+				logger.Warn("Failed to initialize RabbitMQ producer, using mock", zap.Error(err))
+				producer = mq.NewMockProducer(logger.Logger)
+			} else {
+				logger.Info("Using RabbitMQ producer")
+			}
+		} else {
+			producer = mq.NewMockProducer(logger.Logger)
+			logger.Info("Producer disabled, using mock")
+		}
+	}
+
 	return &Dependencies{
 		Repository:  repo,
 		ExternalAPI: externalAPI,
@@ -122,6 +156,7 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 		UseCase:     uc,
 		Validator:   validator,
 		Handler:     handler,
+		Producer:    producer,
 	}, nil
 }
 
@@ -217,7 +252,7 @@ func createLoggingMiddleware(logger *logger.Logger) echo.MiddlewareFunc {
 }
 
 // startServer starts the HTTP server with graceful shutdown
-func startServer(e *echo.Echo, cfg *config.Config, logger *logger.Logger) {
+func startServer(e *echo.Echo, cfg *config.Config, logger *logger.Logger, deps *Dependencies) {
 	// Server configuration
 	server := &http.Server{
 		Addr:         cfg.GetServerAddress(),
@@ -246,12 +281,19 @@ func startServer(e *echo.Echo, cfg *config.Config, logger *logger.Logger) {
 
 	logger.Info("Shutting down server...")
 
+	// Close message queue producer
+	if err := deps.Producer.Close(); err != nil {
+		logger.Error("Failed to close message queue producer", zap.Error(err))
+	} else {
+		logger.Info("Message queue producer closed")
+	}
+
 	// Create shutdown context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+	defer shutdownCancel()
 
 	// Shutdown server
-	if err := e.Shutdown(ctx); err != nil {
+	if err := e.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Server forced to shutdown", zap.Error(err))
 	} else {
 		logger.Info("Server exited gracefully")

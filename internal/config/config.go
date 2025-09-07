@@ -11,11 +11,12 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server      ServerConfig      `json:"server"`
-	Database    DatabaseConfig    `json:"database"`
-	ExternalAPI ExternalAPIConfig `json:"external_api"`
-	Logger      LoggerConfig      `json:"logger"`
-	App         AppConfig         `json:"app"`
+	Server       ServerConfig       `json:"server"`
+	Database     DatabaseConfig     `json:"database"`
+	ExternalAPI  ExternalAPIConfig  `json:"external_api"`
+	MessageQueue MessageQueueConfig `json:"message_queue"`
+	Logger       LoggerConfig       `json:"logger"`
+	App          AppConfig          `json:"app"`
 }
 
 // ServerConfig holds server configuration
@@ -54,6 +55,24 @@ type ExternalAPIConfig struct {
 	MockDelay      time.Duration     `json:"mock_delay"`
 	MockShouldFail bool              `json:"mock_should_fail"`
 	Headers        map[string]string `json:"headers"`
+}
+
+// MessageQueueConfig holds message queue configuration
+type MessageQueueConfig struct {
+	URL               string        `json:"url"`
+	ExchangeName      string        `json:"exchange_name"`
+	QueueName         string        `json:"queue_name"`
+	RoutingPrefix     string        `json:"routing_prefix"`
+	RoutingKeys       []string      `json:"routing_keys"`
+	Durable           bool          `json:"durable"`
+	AutoDelete        bool          `json:"auto_delete"`
+	Exclusive         bool          `json:"exclusive"`
+	NoWait            bool          `json:"no_wait"`
+	PrefetchCount     int           `json:"prefetch_count"`
+	EnableProducer    bool          `json:"enable_producer"`
+	EnableConsumer    bool          `json:"enable_consumer"`
+	EnableMock        bool          `json:"enable_mock"`
+	ReconnectInterval time.Duration `json:"reconnect_interval"`
 }
 
 // LoggerConfig holds logger configuration
@@ -107,6 +126,22 @@ func Load() (*Config, error) {
 			MockDelay:      getEnvAsDuration("EXTERNAL_API_MOCK_DELAY", 100*time.Millisecond),
 			MockShouldFail: getEnvAsBool("EXTERNAL_API_MOCK_SHOULD_FAIL", false),
 			Headers:        getEnvAsMap("EXTERNAL_API_HEADERS", map[string]string{}),
+		},
+		MessageQueue: MessageQueueConfig{
+			URL:               getEnv("MQ_URL", "amqp://guest:guest@localhost:5672/"),
+			ExchangeName:      getEnv("MQ_EXCHANGE_NAME", "examples"),
+			QueueName:         getEnv("MQ_QUEUE_NAME", "example-events"),
+			RoutingPrefix:     getEnv("MQ_ROUTING_PREFIX", "example"),
+			RoutingKeys:       getEnvAsSlice("MQ_ROUTING_KEYS", []string{"example.created", "example.updated", "example.deleted"}),
+			Durable:           getEnvAsBool("MQ_DURABLE", true),
+			AutoDelete:        getEnvAsBool("MQ_AUTO_DELETE", false),
+			Exclusive:         getEnvAsBool("MQ_EXCLUSIVE", false),
+			NoWait:            getEnvAsBool("MQ_NO_WAIT", false),
+			PrefetchCount:     getEnvAsInt("MQ_PREFETCH_COUNT", 10),
+			EnableProducer:    getEnvAsBool("MQ_ENABLE_PRODUCER", true),
+			EnableConsumer:    getEnvAsBool("MQ_ENABLE_CONSUMER", true),
+			EnableMock:        getEnvAsBool("MQ_ENABLE_MOCK", true),
+			ReconnectInterval: getEnvAsDuration("MQ_RECONNECT_INTERVAL", 5*time.Second),
 		},
 		Logger: LoggerConfig{
 			Level:       getEnv("LOG_LEVEL", "info"),
