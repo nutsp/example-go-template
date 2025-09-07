@@ -134,7 +134,7 @@ func initializeConsumerDependencies(cfg *config.Config, logger *logger.Logger) (
 	} else {
 		// Use real RabbitMQ implementation
 		if !cfg.MessageQueue.EnableConsumer {
-			logger.Fatal("Consumer is disabled in configuration")
+			return nil, fmt.Errorf("consumer is disabled in configuration")
 		}
 
 		consumerConfig := &mq.RabbitMQConsumerConfig{

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"example-api-template/internal/domain"
@@ -343,9 +345,14 @@ func (m *MockProducer) ClearEvents() {
 
 // Helper functions
 
+var eventCounter int64
+
 // generateEventID generates a unique event ID
 func generateEventID() string {
-	return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	// Use timestamp + counter + random component for uniqueness
+	counter := atomic.AddInt64(&eventCounter, 1)
+	random := rand.Int63n(1000000)
+	return fmt.Sprintf("evt_%d_%d_%d", time.Now().UnixNano(), counter, random)
 }
 
 // extractUserID extracts user ID from context

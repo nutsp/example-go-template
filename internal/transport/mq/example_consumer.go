@@ -503,9 +503,21 @@ func contains(str, substr string) bool {
 					containsInMiddle(str, substr))))
 }
 
-// containsInMiddle checks if substr is contained in the middle of str
+// containsInMiddle checks if substr is contained in the middle of str (not at start or end)
 func containsInMiddle(str, substr string) bool {
-	for i := 1; i <= len(str)-len(substr); i++ {
+	if len(substr) == 0 || len(str) <= len(substr) {
+		return false
+	}
+
+	// Check if substring is at the beginning or end
+	if len(str) >= len(substr) {
+		if str[:len(substr)] == substr || str[len(str)-len(substr):] == substr {
+			return false // Found at start or end, not in middle
+		}
+	}
+
+	// Look for substring in the middle
+	for i := 1; i <= len(str)-len(substr)-1; i++ {
 		if str[i:i+len(substr)] == substr {
 			return true
 		}
