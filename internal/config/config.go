@@ -17,6 +17,7 @@ type Config struct {
 	MessageQueue MessageQueueConfig `json:"message_queue"`
 	Logger       LoggerConfig       `json:"logger"`
 	App          AppConfig          `json:"app"`
+	I18n         I18nConfig         `json:"i18n"`
 }
 
 // ServerConfig holds server configuration
@@ -92,6 +93,13 @@ type AppConfig struct {
 	Debug       bool   `json:"debug"`
 }
 
+// I18nConfig holds internationalization configuration
+type I18nConfig struct {
+	DefaultLanguage string   `json:"default_language"`
+	Languages       []string `json:"languages"`
+	TranslationDir  string   `json:"translation_dir"`
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	config := &Config{
@@ -144,7 +152,7 @@ func Load() (*Config, error) {
 			ReconnectInterval: getEnvAsDuration("MQ_RECONNECT_INTERVAL", 5*time.Second),
 		},
 		Logger: LoggerConfig{
-			Level:       getEnv("LOG_LEVEL", "info"),
+			Level:       getEnv("LOG_LEVEL", "debug"),
 			Format:      getEnv("LOG_FORMAT", "json"),
 			Development: getEnvAsBool("LOG_DEVELOPMENT", false),
 			EnableColor: getEnvAsBool("LOG_ENABLE_COLOR", false),
@@ -155,6 +163,11 @@ func Load() (*Config, error) {
 			Version:     getEnv("APP_VERSION", "1.0.0"),
 			Environment: getEnv("APP_ENVIRONMENT", "development"),
 			Debug:       getEnvAsBool("APP_DEBUG", false),
+		},
+		I18n: I18nConfig{
+			DefaultLanguage: getEnv("I18N_DEFAULT_LANGUAGE", "en"),
+			Languages:       getEnvAsSlice("I18N_LANGUAGES", []string{"en", "es", "fr", "th"}),
+			TranslationDir:  getEnv("I18N_TRANSLATION_DIR", "translations"),
 		},
 	}
 

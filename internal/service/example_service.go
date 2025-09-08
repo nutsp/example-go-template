@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"example-api-template/internal/domain"
+	"example-api-template/internal/errs"
 	"example-api-template/internal/repository"
 
 	"go.uber.org/zap"
@@ -44,18 +45,30 @@ func NewExampleService(repo repository.ExampleRepository, logger *zap.Logger) Ex
 // CreateExample creates a new example with business logic validation
 func (s *exampleService) CreateExample(ctx context.Context, name, email string, age int) (*domain.Example, error) {
 	logger := s.logger.With(
+		zap.String("layer", "Service"),
 		zap.String("operation", "CreateExample"),
 		zap.String("email", email),
 		zap.String("name", name),
 		zap.Int("age", age),
 	)
 
-	logger.Info("Creating new example")
+	// Input validation
+	if name == "" {
+		return nil, errs.New(errs.ErrorCodeInvalidName, errors.New("name cannot be empty"), nil)
+	}
+	if email == "" {
+		return nil, errs.New(errs.ErrorCodeInvalidEmail, errors.New("email cannot be empty"), nil)
+	}
+	if age < 0 || age > 150 {
+		return nil, errs.New(errs.ErrorCodeInvalidAge, errors.New("age must be between 0 and 150"), map[string]interface{}{
+			"age": age,
+		})
+	}
 
 	// Business logic validation
-	if err := s.ValidateExampleBusinessRules(ctx, name, email, age); err != nil {
-		logger.Error("Business validation failed", zap.Error(err))
-		return nil, fmt.Errorf("%w: %v", ErrBusinessLogicFail, err)
+	if appErr := s.ValidateExampleBusinessRules(ctx, name, email, age); appErr != nil {
+		logger.Error("Business validation failed", zap.Error(appErr))
+		return nil, errs.New(errs.ErrorCodeBusinessLogicFail, appErr, nil)
 	}
 
 	// Generate ID (in real app, might use UUID)
@@ -65,19 +78,21 @@ func (s *exampleService) CreateExample(ctx context.Context, name, email string, 
 	example, err := domain.NewExample(id, name, email, age)
 	if err != nil {
 		logger.Error("Failed to create domain entity", zap.Error(err))
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return nil, errs.New(errs.ErrorCodeInvalidInput, err, nil)
 	}
 
 	// Check if example with same email already exists
 	if _, err := s.repo.GetByEmail(ctx, email); err == nil {
 		logger.Error("Example with email already exists", zap.String("email", email))
-		return nil, fmt.Errorf("%w: example with email %s already exists", ErrBusinessLogicFail, email)
+		return nil, errs.New(errs.ErrorCodeExampleAlreadyExists, err, map[string]interface{}{
+			"Email": email,
+		})
 	}
 
 	// Save to repository
 	if err := s.repo.Create(ctx, example); err != nil {
 		logger.Error("Failed to save example", zap.Error(err))
-		return nil, fmt.Errorf("failed to save example: %w", err)
+		return nil, errs.New(errs.ErrorCodeDatabaseError, err, nil)
 	}
 
 	logger.Info("Example created successfully", zap.String("id", example.ID))
@@ -92,13 +107,21 @@ func (s *exampleService) GetExampleByID(ctx context.Context, id string) (*domain
 	)
 
 	if id == "" {
-		return nil, fmt.Errorf("%w: id cannot be empty", ErrInvalidInput)
+		return nil, errs.New(errs.ErrorCodeInvalidID, errors.New("id cannot be empty"), nil)
 	}
 
 	example, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrExampleNotFound) {
+			logger.Warn("Example not found", zap.String("id", id))
+			return nil, errs.New(errs.ErrorCodeExampleNotFound, errors.New("example not found"), map[string]interface{}{
+				"id": id,
+			})
+		}
 		logger.Error("Failed to get example", zap.Error(err))
-		return nil, err
+		return nil, errs.New(errs.ErrorCodeDatabaseError, err, map[string]interface{}{
+			"id": id,
+		})
 	}
 
 	logger.Info("Example retrieved successfully")
@@ -113,13 +136,21 @@ func (s *exampleService) GetExampleByEmail(ctx context.Context, email string) (*
 	)
 
 	if email == "" {
-		return nil, fmt.Errorf("%w: email cannot be empty", ErrInvalidInput)
+		return nil, errs.New(errs.ErrorCodeInvalidEmail, errors.New("email cannot be empty"), nil)
 	}
 
 	example, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, repository.ErrExampleNotFound) {
+			logger.Warn("Example not found", zap.String("email", email))
+			return nil, errs.New(errs.ErrorCodeExampleNotFound, errors.New("example not found"), map[string]interface{}{
+				"email": email,
+			})
+		}
 		logger.Error("Failed to get example by email", zap.Error(err))
-		return nil, err
+		return nil, errs.New(errs.ErrorCodeDatabaseError, err, map[string]interface{}{
+			"email": email,
+		})
 	}
 
 	logger.Info("Example retrieved successfully by email")
@@ -136,41 +167,63 @@ func (s *exampleService) UpdateExample(ctx context.Context, id, name, email stri
 
 	logger.Info("Updating example")
 
+	// Input validation
 	if id == "" {
-		return nil, fmt.Errorf("%w: id cannot be empty", ErrInvalidInput)
+		return nil, errs.New(errs.ErrorCodeInvalidID, errors.New("id cannot be empty"), nil)
+	}
+	if name == "" {
+		return nil, errs.New(errs.ErrorCodeInvalidName, errors.New("name cannot be empty"), nil)
+	}
+	if email == "" {
+		return nil, errs.New(errs.ErrorCodeInvalidEmail, errors.New("email cannot be empty"), nil)
+	}
+	if age < 0 || age > 150 {
+		return nil, errs.New(errs.ErrorCodeInvalidAge, errors.New("age must be between 0 and 150"), map[string]interface{}{
+			"age": age,
+		})
 	}
 
 	// Business logic validation
-	if err := s.ValidateExampleBusinessRules(ctx, name, email, age); err != nil {
-		logger.Error("Business validation failed", zap.Error(err))
-		return nil, fmt.Errorf("%w: %v", ErrBusinessLogicFail, err)
+	if appErr := s.ValidateExampleBusinessRules(ctx, name, email, age); appErr != nil {
+		// logger.Error("Business validation failed", zap.String("code", string(appErr.Code)))
+		return nil, errs.New(errs.ErrorCodeBusinessLogicFail, appErr, nil)
 	}
 
 	// Get existing example
 	example, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrExampleNotFound) {
+			logger.Warn("Example not found", zap.String("id", id))
+			return nil, errs.New(errs.ErrorCodeExampleNotFound, errors.New("example not found"), map[string]interface{}{
+				"id": id,
+			})
+		}
 		logger.Error("Failed to get existing example", zap.Error(err))
-		return nil, err
+		return nil, errs.New(errs.ErrorCodeDatabaseError, err, map[string]interface{}{
+			"id": id,
+		})
 	}
 
 	// Check if email is being changed and conflicts with another example
 	if example.Email != email {
 		if existing, err := s.repo.GetByEmail(ctx, email); err == nil && existing.ID != id {
 			logger.Error("Email already in use by another example", zap.String("email", email))
-			return nil, fmt.Errorf("%w: email %s is already in use", ErrBusinessLogicFail, email)
+			return nil, errs.New(errs.ErrorCodeExampleAlreadyExists, errors.New("email already in use"), map[string]interface{}{
+				"email": email,
+			})
 		}
 	}
 
 	// Update the domain entity
 	if err := example.Update(name, email, age); err != nil {
 		logger.Error("Failed to update domain entity", zap.Error(err))
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return nil, errs.New(errs.ErrorCodeInvalidInput, err, nil)
 	}
 
 	// Save to repository
 	if err := s.repo.Update(ctx, example); err != nil {
 		logger.Error("Failed to update example", zap.Error(err))
-		return nil, fmt.Errorf("failed to update example: %w", err)
+		return nil, errs.New(errs.ErrorCodeDatabaseError, err, nil)
 	}
 
 	logger.Info("Example updated successfully")
@@ -185,18 +238,28 @@ func (s *exampleService) DeleteExample(ctx context.Context, id string) error {
 	)
 
 	if id == "" {
-		return fmt.Errorf("%w: id cannot be empty", ErrInvalidInput)
+		return errs.New(errs.ErrorCodeInvalidID, errors.New("id cannot be empty"), nil)
 	}
 
 	// Check if example exists before deletion
 	if _, err := s.repo.GetByID(ctx, id); err != nil {
-		logger.Error("Example not found for deletion", zap.Error(err))
-		return err
+		if errors.Is(err, repository.ErrExampleNotFound) {
+			logger.Warn("Example not found for deletion", zap.String("id", id))
+			return errs.New(errs.ErrorCodeExampleNotFound, err, map[string]interface{}{
+				"id": id,
+			})
+		}
+		logger.Error("Failed to check example existence", zap.Error(err))
+		return errs.New(errs.ErrorCodeDatabaseError, err, map[string]interface{}{
+			"id": id,
+		})
 	}
 
 	if err := s.repo.Delete(ctx, id); err != nil {
 		logger.Error("Failed to delete example", zap.Error(err))
-		return fmt.Errorf("failed to delete example: %w", err)
+		return errs.New(errs.ErrorCodeDatabaseError, err, map[string]interface{}{
+			"id": id,
+		})
 	}
 
 	logger.Info("Example deleted successfully")
@@ -225,13 +288,13 @@ func (s *exampleService) ListExamples(ctx context.Context, limit, offset int) ([
 	examples, err := s.repo.List(ctx, limit, offset)
 	if err != nil {
 		logger.Error("Failed to list examples", zap.Error(err))
-		return nil, 0, fmt.Errorf("failed to list examples: %w", err)
+		return nil, 0, errs.New(errs.ErrorCodeDatabaseError, err, nil)
 	}
 
 	total, err := s.repo.Count(ctx)
 	if err != nil {
 		logger.Error("Failed to count examples", zap.Error(err))
-		return nil, 0, fmt.Errorf("failed to count examples: %w", err)
+		return nil, 0, errs.New(errs.ErrorCodeDatabaseError, err, nil)
 	}
 
 	logger.Info("Examples listed successfully",
@@ -245,17 +308,25 @@ func (s *exampleService) ListExamples(ctx context.Context, limit, offset int) ([
 func (s *exampleService) ValidateExampleBusinessRules(ctx context.Context, name, email string, age int) error {
 	// Business rule: No profanity in names
 	if containsProfanity(name) {
-		return errors.New("name contains inappropriate content")
+		return errs.New(errs.ErrorCodeProfanityDetected, errors.New("name contains inappropriate content"), map[string]interface{}{
+			"name": name,
+		})
 	}
 
 	// Business rule: Corporate emails have different age restrictions
 	if isCorporateEmail(email) && age < 18 {
-		return errors.New("corporate accounts require minimum age of 18")
+		return errs.New(errs.ErrorCodeCorporateEmailUnderage, errors.New("corporate accounts require minimum age of 18"), map[string]interface{}{
+			"email": email,
+			"age":   age,
+		})
 	}
 
 	// Business rule: VIP domains get special treatment
 	if isVIPDomain(email) && age < 21 {
-		return errors.New("VIP accounts require minimum age of 21")
+		return errs.New(errs.ErrorCodeVIPDomainUnderage, errors.New("VIP accounts require minimum age of 21"), map[string]interface{}{
+			"email": email,
+			"age":   age,
+		})
 	}
 
 	return nil

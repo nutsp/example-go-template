@@ -48,6 +48,7 @@ example-api-template/
 - **CRUD Operations**: Complete Create, Read, Update, Delete operations for Example entities
 - **Business Logic**: Name validation, email uniqueness, age restrictions, corporate/VIP domain rules
 - **Database Support**: In-memory and PostgreSQL repositories with GORM ORM
+- **Internationalization (i18n)**: Multi-language support with localized error messages and responses
 - **External API Integration**: Validation, enrichment, and notification services
 - **Message Queue Integration**: Asynchronous event publishing and consumption with RabbitMQ
 - **Pagination**: Efficient list operations with limit/offset pagination
@@ -214,6 +215,80 @@ The service includes both embedded and standalone consumer options:
 
 The server will start on `http://localhost:8080` and the consumer will process events from the message queue
 
+### Internationalization (i18n) Usage
+
+The API supports multiple languages through HTTP headers:
+
+#### Language Detection (Priority Order)
+1. **Query Parameter**: `?lang=es`
+2. **Custom Header**: `X-Language: es`
+3. **Accept-Language Header**: `Accept-Language: es-ES,es;q=0.9,en;q=0.8`
+4. **Cookie**: `language=es`
+5. **Default**: Falls back to configured default language
+
+#### Example Requests
+```bash
+# Using query parameter
+curl -X GET "http://localhost:8080/examples?lang=es"
+
+# Using custom header
+curl -X GET "http://localhost:8080/examples" \
+  -H "X-Language: fr"
+
+# Using Accept-Language header
+curl -X GET "http://localhost:8080/examples" \
+  -H "Accept-Language: es-ES,es;q=0.9,en;q=0.8"
+
+# Response includes Content-Language header
+HTTP/1.1 200 OK
+Content-Language: es
+Content-Type: application/json
+{
+  "message": "Ejemplos obtenidos exitosamente",
+  "data": [...]
+}
+```
+
+#### Supported Languages
+- **English (en)**: Default language
+- **Spanish (es)**: Full translation support
+- **French (fr)**: Full translation support
+- **Thai (th)**: Full translation support
+
+#### Adding New Languages
+1. Create translation file: `translations/{language}.json`
+2. Add language to `I18N_LANGUAGES` environment variable
+3. Restart the application
+
+#### Testing Thai Language Support
+```bash
+# Run the comprehensive Thai language test
+./examples/test_thai_api.sh
+
+# Or test manually with curl
+curl -H "Accept-Language: th" http://localhost:8080/api/v1/examples
+curl -H "X-Language: th" http://localhost:8080/api/v1/examples
+curl "http://localhost:8080/api/v1/examples?lang=th"
+```
+
+#### Example Thai API Responses
+```json
+// Thai success response
+{
+  "message": "ตัวอย่างสร้างสำเร็จ",
+  "id": "123",
+  "name": "สมชาย ใจดี",
+  "email": "somchai@example.com",
+  "age": 28
+}
+
+// Thai error response
+{
+  "error": "ไม่พบตัวอย่างที่มี ID '123'",
+  "message": "ไม่พบตัวอย่าง"
+}
+```
+
 ### Configuration
 
 Configure the application using environment variables:
@@ -258,6 +333,13 @@ DB_SSL_MODE=disable               # SSL mode: disable, require, verify-ca, verif
 DB_MAX_CONNECTIONS=25             # Maximum open connections (default: 25)
 DB_MAX_IDLE_CONNS=5               # Maximum idle connections (default: 5)
 DB_CONN_MAX_LIFETIME=5m           # Connection max lifetime (default: 5m)
+```
+
+#### Internationalization Configuration
+```bash
+I18N_DEFAULT_LANGUAGE=en          # Default language (default: en)
+I18N_LANGUAGES=en,es,fr,th        # Supported languages (default: en,es,fr,th)
+I18N_TRANSLATION_DIR=translations # Translation files directory (default: translations)
 ```
 
 #### Message Queue Configuration

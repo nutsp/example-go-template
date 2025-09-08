@@ -19,7 +19,7 @@ type ValidationFieldErrorDTO struct {
 
 // Validator wraps the go-playground validator with additional functionality
 type Validator interface {
-	ValidateStruct(s interface{}) []ValidationFieldErrorDTO
+	ValidateStruct(s interface{}) ([]ValidationFieldErrorDTO, error)
 	ValidateVar(field interface{}, tag string) error
 	RegisterValidation(tag string, fn validator.Func) error
 }
@@ -50,7 +50,7 @@ func New() Validator {
 }
 
 // ValidateStruct validates a struct and returns validation errors
-func (cv *customValidator) ValidateStruct(s interface{}) []ValidationFieldErrorDTO {
+func (cv *customValidator) ValidateStruct(s interface{}) ([]ValidationFieldErrorDTO, error) {
 	var validationErrors []ValidationFieldErrorDTO
 
 	err := cv.validator.Struct(s)
@@ -68,7 +68,7 @@ func (cv *customValidator) ValidateStruct(s interface{}) []ValidationFieldErrorD
 		}
 	}
 
-	return validationErrors
+	return validationErrors, err
 }
 
 // ValidateVar validates a single variable

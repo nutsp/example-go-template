@@ -1,6 +1,7 @@
 package http
 
 import (
+	"strings"
 	"time"
 
 	"example-api-template/internal/domain"
@@ -50,6 +51,7 @@ type ListExamplesRequestDTO struct {
 
 // ListExamplesResponseDTO represents the HTTP response for listing examples
 type ListExamplesResponseDTO struct {
+	Message    string                `json:"message,omitempty"`
 	Examples   []*ExampleResponseDTO `json:"examples"`
 	Total      int                   `json:"total"`
 	Limit      int                   `json:"limit"`
@@ -61,10 +63,10 @@ type ListExamplesResponseDTO struct {
 
 // ErrorResponseDTO represents an error response
 type ErrorResponseDTO struct {
-	Error   string            `json:"error"`
-	Message string            `json:"message"`
-	Code    string            `json:"code,omitempty"`
-	Details map[string]string `json:"details,omitempty"`
+	Error   string      `json:"error"`
+	Message string      `json:"message"`
+	Code    string      `json:"code,omitempty"`
+	Details interface{} `json:"details,omitempty"`
 }
 
 // ValidationErrorResponseDTO represents a validation error response
@@ -193,10 +195,12 @@ func FromListExamplesResponse(response *usecase.ListExamplesResponse) *ListExamp
 }
 
 // NewErrorResponse creates a new error response
-func NewErrorResponse(err error, message string) *ErrorResponseDTO {
+func NewErrorResponse(code string, err error, message string, details interface{}) *ErrorResponseDTO {
 	return &ErrorResponseDTO{
+		Code:    strings.ToUpper(code),
 		Error:   err.Error(),
 		Message: message,
+		Details: details,
 	}
 }
 

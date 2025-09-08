@@ -16,6 +16,7 @@ import (
 	"example-api-template/internal/transport/mq"
 	"example-api-template/internal/usecase"
 	"example-api-template/pkg/database"
+	"example-api-template/pkg/i18n"
 	"example-api-template/pkg/logger"
 	"example-api-template/pkg/validator"
 
@@ -56,7 +57,7 @@ func main() {
 	}
 
 	// Initialize Echo server
-	e := setupEcho(cfg, appLogger)
+	e := setupEcho(cfg, appLogger, deps)
 
 	// Register routes
 	deps.Handler.RegisterRoutes(e)
@@ -75,17 +76,30 @@ type Dependencies struct {
 	Handler     *httpTransport.ExampleHandler
 	Producer    mq.ExampleProducer
 	DBConn      *database.PostgreSQLConnection // Optional, only for PostgreSQL
+	Localizer   *i18n.Localizer                // i18n support
 }
 
 // initializeDependencies initializes all application dependencies
 func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Dependencies, error) {
+	// Initialize i18n
+	i18nConfig := &i18n.Config{
+		DefaultLanguage: cfg.I18n.DefaultLanguage,
+		Languages:       cfg.I18n.Languages,
+		TranslationDir:  cfg.I18n.TranslationDir,
+	}
+
+	localizer, err := i18n.NewLocalizer(i18nConfig)
+	if err != nil {
+		logger.Warn("Failed to initialize i18n, using fallback", zap.Error(err))
+	}
+
 	// Initialize validator
 	validator := validator.New()
 
 	// Initialize repository
 	var repo repository.ExampleRepository
 	var dbConn *database.PostgreSQLConnection
-	var err error
+	var dbErr error
 
 	switch cfg.Database.Type {
 	case "memory":
@@ -93,14 +107,14 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 		logger.Info("Using in-memory repository")
 	case "postgres", "postgresql":
 		// Initialize PostgreSQL connection
-		dbConn, err = database.NewPostgreSQLConnection(&cfg.Database, logger)
-		if err != nil {
-			logger.Error("Failed to connect to PostgreSQL, falling back to in-memory repository", zap.Error(err))
+		dbConn, dbErr = database.NewPostgreSQLConnection(&cfg.Database, logger)
+		if dbErr != nil {
+			logger.Error("Failed to connect to PostgreSQL, falling back to in-memory repository", zap.Error(dbErr))
 			repo = repository.NewInMemoryExampleRepository()
 		} else {
 			// Run health check
-			if err := dbConn.HealthCheck(); err != nil {
-				logger.Error("PostgreSQL health check failed, falling back to in-memory repository", zap.Error(err))
+			if dbErr := dbConn.HealthCheck(); dbErr != nil {
+				logger.Error("PostgreSQL health check failed, falling back to in-memory repository", zap.Error(dbErr))
 				dbConn.Close()
 				dbConn = nil
 				repo = repository.NewInMemoryExampleRepository()
@@ -109,8 +123,8 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 				pgRepo := repository.NewPostgreSQLExampleRepository(dbConn.DB)
 
 				// Run migrations
-				if err := pgRepo.AutoMigrate(); err != nil {
-					logger.Error("Database migration failed, falling back to in-memory repository", zap.Error(err))
+				if dbErr := pgRepo.AutoMigrate(); dbErr != nil {
+					logger.Error("Database migration failed, falling back to in-memory repository", zap.Error(dbErr))
 					dbConn.Close()
 					dbConn = nil
 					repo = repository.NewInMemoryExampleRepository()
@@ -152,7 +166,7 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 	uc := usecase.NewExampleUseCase(svc, externalAPI, logger.Logger)
 
 	// Initialize HTTP handler
-	handler := httpTransport.NewExampleHandler(uc, validator, logger.Logger)
+	handler := httpTransport.NewExampleHandler(uc, validator, logger.Logger, localizer)
 
 	// Initialize message queue producer only (consumer runs separately)
 	var producer mq.ExampleProducer
@@ -195,11 +209,12 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 		Handler:     handler,
 		Producer:    producer,
 		DBConn:      dbConn,
+		Localizer:   localizer,
 	}, nil
 }
 
 // setupEcho configures the Echo web framework
-func setupEcho(cfg *config.Config, logger *logger.Logger) *echo.Echo {
+func setupEcho(cfg *config.Config, logger *logger.Logger, deps *Dependencies) *echo.Echo {
 	e := echo.New()
 
 	// Hide Echo banner
@@ -209,8 +224,12 @@ func setupEcho(cfg *config.Config, logger *logger.Logger) *echo.Echo {
 	// Configure Echo
 	e.Debug = cfg.App.Debug
 
+	// Set custom error handler with i18n support
+	e.HTTPErrorHandler = httpTransport.ErrorHandlerMiddleware(deps.Localizer)
+
 	// Middleware
-	e.Use(middleware.RequestID())
+	e.Use(httpTransport.RequestIDMiddleware())
+	e.Use(httpTransport.I18nMiddleware(deps.Localizer))
 	e.Use(createLoggingMiddleware(logger))
 	e.Use(middleware.Recover())
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{
@@ -218,23 +237,7 @@ func setupEcho(cfg *config.Config, logger *logger.Logger) *echo.Echo {
 	}))
 
 	if cfg.Server.EnableCORS {
-		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-			AllowOrigins: []string{"*"},
-			AllowMethods: []string{
-				http.MethodGet,
-				http.MethodPost,
-				http.MethodPut,
-				http.MethodDelete,
-				http.MethodOptions,
-			},
-			AllowHeaders: []string{
-				echo.HeaderOrigin,
-				echo.HeaderContentType,
-				echo.HeaderAccept,
-				echo.HeaderAuthorization,
-				"X-Request-ID",
-			},
-		}))
+		e.Use(httpTransport.CORSMiddleware())
 	}
 
 	// Security headers

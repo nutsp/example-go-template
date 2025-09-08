@@ -89,11 +89,10 @@ func NewExampleUseCase(
 // CreateExample creates a new example with external validation
 func (uc *exampleUseCase) CreateExample(ctx context.Context, req CreateExampleRequest) (*ExampleWithMetadata, error) {
 	logger := uc.logger.With(
+		zap.String("layer", "UseCase"),
 		zap.String("operation", "CreateExample"),
 		zap.String("email", req.Email),
 	)
-
-	logger.Info("Creating example via use case")
 
 	// Create example using service
 	example, err := uc.service.CreateExample(ctx, req.Name, req.Email, req.Age)
