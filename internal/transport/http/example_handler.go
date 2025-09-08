@@ -4,39 +4,43 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"example-api-template/internal/errs"
-	"example-api-template/internal/repository"
-	"example-api-template/internal/service"
 	"example-api-template/internal/usecase"
-	"example-api-template/pkg/i18n"
 	"example-api-template/pkg/validator"
 
 	"github.com/labstack/echo/v4"
-	"go.uber.org/zap"
+)
+
+// Constants for validation and limits
+const (
+	DefaultLimit = 10
+	MaxLimit     = 100
+	MinAge       = 0
+	MaxAge       = 150
+	MinNameLen   = 1
+	MaxNameLen   = 100
+)
+
+// Error messages
+const (
+	ErrMsgMissingID = "missing id"
 )
 
 // ExampleHandler handles HTTP requests for examples
 type ExampleHandler struct {
 	useCase   usecase.ExampleUseCase
 	validator validator.Validator
-	logger    *zap.Logger
-	localizer *i18n.Localizer
 }
 
 // NewExampleHandler creates a new example handler
 func NewExampleHandler(
 	useCase usecase.ExampleUseCase,
 	validator validator.Validator,
-	logger *zap.Logger,
-	localizer *i18n.Localizer,
 ) *ExampleHandler {
 	return &ExampleHandler{
 		useCase:   useCase,
 		validator: validator,
-		logger:    logger,
-		localizer: localizer,
 	}
 }
 
@@ -87,9 +91,7 @@ func (h *ExampleHandler) CreateExample(c echo.Context) error {
 		return err
 	}
 
-	response := FromExampleWithMetadata(example)
-
-	return c.JSON(http.StatusCreated, response)
+	return c.JSON(http.StatusCreated, FromExampleWithMetadata(example))
 }
 
 // GetExample retrieves an example by ID
@@ -104,20 +106,14 @@ func (h *ExampleHandler) CreateExample(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples/{id} [get]
 func (h *ExampleHandler) GetExample(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "GetExample"),
-		zap.String("id", c.Param("id")),
-	)
-
 	id := c.Param("id")
 	if id == "" {
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(
-		// 	errors.New("missing id"), "Example ID is required"))
+		return errs.New(errs.ErrorCodeExampleIDRequired, errors.New(ErrMsgMissingID), nil)
 	}
 
 	example, err := h.useCase.GetExample(c.Request().Context(), id)
 	if err != nil {
-		return h.handleError(c, err, "Failed to get example", logger)
+		return err
 	}
 
 	return c.JSON(http.StatusOK, FromExampleWithMetadata(example))
@@ -135,20 +131,14 @@ func (h *ExampleHandler) GetExample(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples/email/{email} [get]
 func (h *ExampleHandler) GetExampleByEmail(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "GetExampleByEmail"),
-		zap.String("email", c.Param("email")),
-	)
-
 	email := c.Param("email")
 	if email == "" {
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(
-		// 	errors.New("missing email"), "Email is required"))
+		return errs.New(errs.ErrorCodeExampleEmailRequired, errors.New("missing email"), nil)
 	}
 
 	example, err := h.useCase.GetExampleByEmail(c.Request().Context(), email)
 	if err != nil {
-		return h.handleError(c, err, "Failed to get example by email", logger)
+		return err
 	}
 
 	return c.JSON(http.StatusOK, FromExampleWithMetadata(example))
@@ -169,36 +159,26 @@ func (h *ExampleHandler) GetExampleByEmail(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples/{id} [put]
 func (h *ExampleHandler) UpdateExample(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "UpdateExample"),
-		zap.String("id", c.Param("id")),
-	)
-
 	id := c.Param("id")
 	if id == "" {
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(
-		// 	errors.New("missing id"), "Example ID is required"))
+		return errs.New(errs.ErrorCodeExampleIDRequired, errors.New(ErrMsgMissingID), nil)
 	}
 
 	var req UpdateExampleRequestDTO
 	if err := c.Bind(&req); err != nil {
-		logger.Error("Failed to bind request", zap.Error(err))
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(err, "Invalid request format"))
+		return errs.New(errs.ErrorCodeInvalidRequest, err, nil)
 	}
 
 	// Validate request
-	if validationErrors, _ := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
-		// logger.Warn("Validation failed", zap.Any("errors", validationErrors))
-		// return c.JSON(http.StatusUnprocessableEntity, NewValidationErrorResponse(
-		// 	"Validation failed", validationErrors))
+	if validationErrors, err := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
+		return errs.New(errs.ErrorCodeValidationFailed, err, validationErrors)
 	}
 
 	example, err := h.useCase.UpdateExample(c.Request().Context(), id, req.ToUpdateExampleRequest())
 	if err != nil {
-		return h.handleError(c, err, "Failed to update example", logger)
+		return err
 	}
 
-	logger.Info("Example updated successfully", zap.String("id", example.ID))
 	return c.JSON(http.StatusOK, FromExampleWithMetadata(example))
 }
 
@@ -214,23 +194,16 @@ func (h *ExampleHandler) UpdateExample(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples/{id} [delete]
 func (h *ExampleHandler) DeleteExample(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "DeleteExample"),
-		zap.String("id", c.Param("id")),
-	)
-
 	id := c.Param("id")
 	if id == "" {
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(
-		// errors.New("missing id"), "Example ID is required"))
+		return errs.New(errs.ErrorCodeExampleIDRequired, errors.New(ErrMsgMissingID), nil)
 	}
 
 	if err := h.useCase.DeleteExample(c.Request().Context(), id); err != nil {
-		return h.handleError(c, err, "Failed to delete example", logger)
+		return err
 	}
 
-	logger.Info("Example deleted successfully", zap.String("id", id))
-	return c.JSON(http.StatusOK, NewSuccessResponse("Example deleted successfully"))
+	return c.NoContent(http.StatusNoContent)
 }
 
 // ListExamples retrieves a paginated list of examples
@@ -245,48 +218,51 @@ func (h *ExampleHandler) DeleteExample(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples [get]
 func (h *ExampleHandler) ListExamples(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "ListExamples"),
-	)
-
 	var req ListExamplesRequestDTO
 
-	// Parse query parameters
+	// Parse query parameters with proper error handling
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
 			req.Limit = limit
+		} else {
+			return errs.New(errs.ErrorCodeInvalidRequest,
+				errors.New("invalid limit parameter"),
+				map[string]string{"limit": "must be a valid integer"})
 		}
 	}
 
 	if offsetStr := c.QueryParam("offset"); offsetStr != "" {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
 			req.Offset = offset
+		} else {
+			return errs.New(errs.ErrorCodeInvalidRequest,
+				errors.New("invalid offset parameter"),
+				map[string]string{"offset": "must be a valid integer"})
 		}
 	}
 
+	// Set defaults if not provided
+	if req.Limit <= 0 {
+		req.Limit = DefaultLimit
+	}
+	if req.Limit > MaxLimit {
+		req.Limit = MaxLimit
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
 	// Validate request
-	if validationErrors, _ := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
-		logger.Warn("Validation failed", zap.Any("errors", validationErrors))
-		// message := h.localizer.LocalizeWithContext(c.Request().Context(), "common.validation_failed", nil)
-		// return c.JSON(http.StatusBadRequest, NewValidationErrorResponse(
-		// message, validationErrors))
+	if validationErrors, err := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
+		return errs.New(errs.ErrorCodeValidationFailed, err, validationErrors)
 	}
 
 	response, err := h.useCase.ListExamples(c.Request().Context(), req.ToListExamplesRequest())
 	if err != nil {
-		return h.handleError(c, err, "Failed to list examples", logger)
+		return err
 	}
 
-	logger.Info("Examples listed successfully",
-		zap.Int("count", len(response.Examples)),
-		zap.Int("total", response.Total))
-
-	// message := h.localizer.LocalizeWithContext(c.Request().Context(), "example.list_retrieved", nil)
-
-	listResponse := FromListExamplesResponse(response)
-	// listResponse.Message = message
-
-	return c.JSON(http.StatusOK, listResponse)
+	return c.JSON(http.StatusOK, FromListExamplesResponse(response))
 }
 
 // ValidateAndCreateExample creates an example with external validation
@@ -302,29 +278,21 @@ func (h *ExampleHandler) ListExamples(c echo.Context) error {
 // @Failure 500 {object} ErrorResponseDTO
 // @Router /api/v1/examples/validate [post]
 func (h *ExampleHandler) ValidateAndCreateExample(c echo.Context) error {
-	logger := h.logger.With(
-		zap.String("handler", "ValidateAndCreateExample"),
-	)
-
 	var req CreateExampleRequestDTO
 	if err := c.Bind(&req); err != nil {
-		// logger.Error("Failed to bind request", zap.Error(err))
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(err, "Invalid request format"))
+		return errs.New(errs.ErrorCodeInvalidRequest, err, nil)
 	}
 
 	// Validate request
-	if validationErrors, _ := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
-		logger.Warn("Validation failed", zap.Any("errors", validationErrors))
-		return c.JSON(http.StatusUnprocessableEntity, NewValidationErrorResponse(
-			"Validation failed", validationErrors))
+	if validationErrors, err := h.validator.ValidateStruct(&req); len(validationErrors) > 0 {
+		return errs.New(errs.ErrorCodeValidationFailed, err, validationErrors)
 	}
 
 	example, err := h.useCase.ValidateAndCreateExample(c.Request().Context(), req.ToCreateExampleRequest())
 	if err != nil {
-		return h.handleError(c, err, "Failed to validate and create example", logger)
+		return err
 	}
 
-	logger.Info("Example validated and created successfully", zap.String("id", example.ID))
 	return c.JSON(http.StatusCreated, FromExampleWithMetadata(example))
 }
 
@@ -344,56 +312,4 @@ func (h *ExampleHandler) HealthCheck(c echo.Context) error {
 
 	response := NewHealthResponse("1.0.0", services)
 	return c.JSON(http.StatusOK, response)
-}
-
-// handleError handles different types of errors and returns appropriate HTTP responses
-func (h *ExampleHandler) handleError(c echo.Context, err error, message string, logger *zap.Logger) error {
-	logger.Error(message, zap.Error(err))
-
-	// Handle specific error types
-	if errors.Is(err, repository.ErrExampleNotFound) {
-		// return c.JSON(http.StatusNotFound, NewErrorResponse(err, "Example not found"))
-	}
-
-	if errors.Is(err, repository.ErrExampleAlreadyExists) {
-		// return c.JSON(http.StatusConflict, NewErrorResponse(err, "Example already exists"))
-	}
-
-	if errors.Is(err, service.ErrInvalidInput) {
-		// return c.JSON(http.StatusBadRequest, NewErrorResponse(err, "Invalid input"))
-	}
-
-	if errors.Is(err, service.ErrBusinessLogicFail) {
-		// return c.JSON(http.StatusUnprocessableEntity, NewErrorResponse(err, "Business logic validation failed"))
-	}
-
-	if errors.Is(err, usecase.ErrUseCaseValidation) {
-		// return c.JSON(http.StatusUnprocessableEntity, NewErrorResponse(err, "Use case validation failed"))
-	}
-
-	if errors.Is(err, usecase.ErrExternalService) {
-		// return c.JSON(http.StatusBadGateway, NewErrorResponse(err, "External service error"))
-	}
-
-	// Handle external API specific errors
-	if errors.Is(err, repository.ErrExternalAPIUnavailable) {
-		// return c.JSON(http.StatusServiceUnavailable, NewErrorResponse(err, "External API unavailable"))
-	}
-
-	if errors.Is(err, repository.ErrExternalAPITimeout) {
-		// return c.JSON(http.StatusGatewayTimeout, NewErrorResponse(err, "External API timeout"))
-	}
-
-	// Check for context errors
-	if strings.Contains(err.Error(), "context deadline exceeded") {
-		// return c.JSON(http.StatusGatewayTimeout, NewErrorResponse(err, "Request timeout"))
-	}
-
-	if strings.Contains(err.Error(), "context canceled") {
-		// return c.JSON(http.StatusRequestTimeout, NewErrorResponse(err, "Request canceled"))
-	}
-
-	// Default to internal server error
-	// return c.JSON(http.StatusInternalServerError, NewErrorResponse(err, "Internal server error"))
-	return errs.New(errs.ErrorCodeInternalError, err, nil)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"example-api-template/internal/domain"
@@ -20,37 +21,37 @@ var (
 
 // CreateExampleRequest represents the input for creating an example
 type CreateExampleRequest struct {
-	Name  string `json:"name" validate:"required,min=1,max=100"`
-	Email string `json:"email" validate:"required,email"`
-	Age   int    `json:"age" validate:"required,min=0,max=150"`
+	Name  string
+	Email string
+	Age   int
 }
 
 // UpdateExampleRequest represents the input for updating an example
 type UpdateExampleRequest struct {
-	Name  string `json:"name" validate:"required,min=1,max=100"`
-	Email string `json:"email" validate:"required,email"`
-	Age   int    `json:"age" validate:"required,min=0,max=150"`
+	Name  string
+	Email string
+	Age   int
 }
 
 // ExampleWithMetadata represents an example with additional metadata
 type ExampleWithMetadata struct {
 	*domain.Example
-	ExternalData *repository.ExternalExampleData `json:"external_data,omitempty"`
-	Enrichment   map[string]interface{}          `json:"enrichment,omitempty"`
+	ExternalData *repository.ExternalExampleData
+	Enrichment   map[string]interface{}
 }
 
 // ListExamplesRequest represents pagination parameters
 type ListExamplesRequest struct {
-	Limit  int `json:"limit" validate:"min=1,max=100"`
-	Offset int `json:"offset" validate:"min=0"`
+	Limit  int
+	Offset int
 }
 
 // ListExamplesResponse represents the paginated response
 type ListExamplesResponse struct {
-	Examples []*ExampleWithMetadata `json:"examples"`
-	Total    int                    `json:"total"`
-	Limit    int                    `json:"limit"`
-	Offset   int                    `json:"offset"`
+	Examples []*ExampleWithMetadata
+	Total    int
+	Limit    int
+	Offset   int
 }
 
 // ExampleUseCase defines the interface for example use cases
@@ -92,6 +93,8 @@ func (uc *exampleUseCase) CreateExample(ctx context.Context, req CreateExampleRe
 		zap.String("layer", "UseCase"),
 		zap.String("operation", "CreateExample"),
 		zap.String("email", req.Email),
+		zap.String("name", req.Name),
+		zap.Int("age", req.Age),
 	)
 
 	// Create example using service
@@ -201,10 +204,10 @@ func (uc *exampleUseCase) ListExamples(ctx context.Context, req ListExamplesRequ
 
 	// Set defaults
 	if req.Limit <= 0 {
-		req.Limit = 10
+		req.Limit = 10 // Default limit
 	}
 	if req.Limit > 100 {
-		req.Limit = 100
+		req.Limit = 100 // Max limit
 	}
 
 	// Get examples from service
@@ -249,13 +252,20 @@ func (uc *exampleUseCase) ValidateAndCreateExample(ctx context.Context, req Crea
 
 	isValid, err := uc.externalAPI.ValidateExample(externalCtx, req.Name, req.Email, req.Age)
 	if err != nil {
-		logger.Error("External validation failed", zap.Error(err))
-		return nil, fmt.Errorf("%w: external validation failed: %v", ErrExternalService, err)
+		logger.Error("External validation failed",
+			zap.String("name", req.Name),
+			zap.String("email", req.Email),
+			zap.Int("age", req.Age),
+			zap.Error(err))
+		return nil, fmt.Errorf("%w: external validation failed for user %s (%s): %v", ErrExternalService, req.Name, req.Email, err)
 	}
 
 	if !isValid {
-		logger.Warn("External validation rejected example")
-		return nil, fmt.Errorf("%w: example rejected by external validation", ErrUseCaseValidation)
+		logger.Warn("External validation rejected example",
+			zap.String("name", req.Name),
+			zap.String("email", req.Email),
+			zap.Int("age", req.Age))
+		return nil, fmt.Errorf("%w: example %s (%s) rejected by external validation", ErrUseCaseValidation, req.Name, req.Email)
 	}
 
 	// Create example using service
@@ -296,17 +306,40 @@ func (uc *exampleUseCase) enrichExample(ctx context.Context, example *domain.Exa
 	externalCtx, cancel := context.WithTimeout(ctx, uc.timeout)
 	defer cancel()
 
-	// Get external data (optional, don't fail if unavailable)
-	if externalData, err := uc.externalAPI.GetExampleData(externalCtx, example.ID); err != nil {
-		logger.Warn("Failed to get external data", zap.String("id", example.ID), zap.Error(err))
-	} else {
+	// Use goroutines to parallelize external API calls
+	var wg sync.WaitGroup
+	var externalData *repository.ExternalExampleData
+	var enrichmentData map[string]interface{}
+	var extErr, enrichErr error
+
+	wg.Add(2)
+
+	// Get external data in parallel
+	go func() {
+		defer wg.Done()
+		externalData, extErr = uc.externalAPI.GetExampleData(externalCtx, example.ID)
+		if extErr != nil {
+			logger.Warn("Failed to get external data", zap.String("id", example.ID), zap.Error(extErr))
+		}
+	}()
+
+	// Get enrichment data in parallel
+	go func() {
+		defer wg.Done()
+		enrichmentData, enrichErr = uc.externalAPI.EnrichExample(externalCtx, example.ID)
+		if enrichErr != nil {
+			logger.Warn("Failed to get enrichment data", zap.String("id", example.ID), zap.Error(enrichErr))
+		}
+	}()
+
+	// Wait for both calls to complete
+	wg.Wait()
+
+	// Set the data if successful
+	if extErr == nil && externalData != nil {
 		enriched.ExternalData = externalData
 	}
-
-	// Get enrichment data (optional, don't fail if unavailable)
-	if enrichmentData, err := uc.externalAPI.EnrichExample(externalCtx, example.ID); err != nil {
-		logger.Warn("Failed to get enrichment data", zap.String("id", example.ID), zap.Error(err))
-	} else {
+	if enrichErr == nil && enrichmentData != nil {
 		enriched.Enrichment = enrichmentData
 	}
 

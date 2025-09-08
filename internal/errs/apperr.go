@@ -3,7 +3,6 @@ package errs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"example-api-template/pkg/i18n"
@@ -58,8 +57,6 @@ func (e *AppError) Localize(localizer *i18n.Localizer, lang string) *AppError {
 // LocalizeWithContext uses lang from context
 func (e *AppError) LocalizeWithContext(localizer *i18n.Localizer, ctx context.Context) *AppError {
 	lang := localizer.GetLanguageFromContext(ctx)
-
-	fmt.Println("lang", lang)
 	return e.Localize(localizer, lang)
 }
 

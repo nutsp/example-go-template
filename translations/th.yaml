@@ -60,3 +60,5 @@ common_validation_failed: "การตรวจสอบล้มเหลว"
 common_success: "สำเร็จ"
 common_failed: "ล้มเหลว"
 
+example_id_required: "ID ตัวอย่างเป็นสิ่งจำเป็น"
+example_email_required: "อีเมลตัวอย่างเป็นสิ่งจำเป็น"

@@ -166,7 +166,7 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 	uc := usecase.NewExampleUseCase(svc, externalAPI, logger.Logger)
 
 	// Initialize HTTP handler
-	handler := httpTransport.NewExampleHandler(uc, validator, logger.Logger, localizer)
+	handler := httpTransport.NewExampleHandler(uc, validator)
 
 	// Initialize message queue producer only (consumer runs separately)
 	var producer mq.ExampleProducer
@@ -235,6 +235,11 @@ func setupEcho(cfg *config.Config, logger *logger.Logger, deps *Dependencies) *e
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{
 		Timeout: cfg.Server.ReadTimeout,
 	}))
+
+	// Security middleware
+	e.Use(httpTransport.InputSanitizationMiddleware())
+	e.Use(httpTransport.RequestSizeLimitMiddleware(1024 * 1024)) // 1MB limit
+	e.Use(httpTransport.IPRateLimitMiddleware(60))               // 60 requests per minute per IP
 
 	if cfg.Server.EnableCORS {
 		e.Use(httpTransport.CORSMiddleware())

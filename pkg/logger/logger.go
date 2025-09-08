@@ -112,13 +112,13 @@ func NewProduction() (*Logger, error) {
 // createEncoderConfig creates encoder configuration based on logger config
 func createEncoderConfig(cfg *config.LoggerConfig) zapcore.EncoderConfig {
 	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     "message",
-		StacktraceKey:  "stacktrace",
+		TimeKey:     "timestamp",
+		LevelKey:    "level",
+		NameKey:     "logger",
+		CallerKey:   "caller",
+		FunctionKey: zapcore.OmitKey,
+		MessageKey:  "message",
+		// StacktraceKey:  "stacktrace",
 		LineEnding:     zapcore.DefaultLineEnding,
 		EncodeLevel:    zapcore.LowercaseLevelEncoder,
 		EncodeTime:     zapcore.ISO8601TimeEncoder,

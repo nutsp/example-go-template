@@ -2,16 +2,16 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	"example-api-template/internal/domain"
 )
 
-var (
-	ErrExampleNotFound      = errors.New("example not found")
-	ErrExampleAlreadyExists = errors.New("example already exists")
+// Error message templates
+const (
+	ErrTemplateID    = "%w: id %s"
+	ErrTemplateEmail = "%w: email %s"
 )
 
 // ExampleRepository defines the interface for example data access
@@ -51,7 +51,7 @@ func (r *InMemoryExampleRepository) Create(ctx context.Context, example *domain.
 	// Check if example with same email already exists
 	for _, existing := range r.data {
 		if existing.Email == example.Email {
-			return fmt.Errorf("%w: email %s", ErrExampleAlreadyExists, example.Email)
+			return fmt.Errorf(ErrTemplateEmail, ErrExampleAlreadyExists, example.Email)
 		}
 	}
 
@@ -89,7 +89,7 @@ func (r *InMemoryExampleRepository) GetByEmail(ctx context.Context, email string
 		}
 	}
 
-	return nil, fmt.Errorf("%w: email %s", ErrExampleNotFound, email)
+	return nil, fmt.Errorf(ErrTemplateEmail, ErrExampleNotFound, email)
 }
 
 // Update updates an existing example
@@ -107,7 +107,7 @@ func (r *InMemoryExampleRepository) Update(ctx context.Context, example *domain.
 	if existing.Email != example.Email {
 		for id, other := range r.data {
 			if id != example.ID && other.Email == example.Email {
-				return fmt.Errorf("%w: email %s", ErrExampleAlreadyExists, example.Email)
+				return fmt.Errorf(ErrTemplateEmail, ErrExampleAlreadyExists, example.Email)
 			}
 		}
 	}
@@ -124,7 +124,7 @@ func (r *InMemoryExampleRepository) Delete(ctx context.Context, id string) error
 	defer r.mutex.Unlock()
 
 	if _, exists := r.data[id]; !exists {
-		return fmt.Errorf("%w: id %s", ErrExampleNotFound, id)
+		return fmt.Errorf(ErrTemplateID, ErrExampleNotFound, id)
 	}
 
 	delete(r.data, id)

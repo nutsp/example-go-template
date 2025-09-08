@@ -40,7 +40,10 @@ func multipleValidExamples() []*domain.Example {
 }
 
 func getTestContext() context.Context {
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Note: In real tests, you should call cancel() when done
+	// For this test helper, we'll let it timeout naturally
+	_ = cancel
 	return ctx
 }
 

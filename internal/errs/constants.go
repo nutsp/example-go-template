@@ -34,4 +34,8 @@ const (
 	// Common errors
 	ErrorCodeInvalidRequest   ErrorCode = "invalid_request"
 	ErrorCodeValidationFailed ErrorCode = "validation_failed"
+
+	// Example errors
+	ErrorCodeExampleIDRequired    ErrorCode = "example_id_required"
+	ErrorCodeExampleEmailRequired ErrorCode = "example_email_required"
 )

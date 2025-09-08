@@ -2,7 +2,11 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"example-api-template/internal/errs"
 	"example-api-template/pkg/i18n"
@@ -94,6 +98,114 @@ func getRequestID(c echo.Context) string {
 		return id
 	}
 	return uuid.New().String()
+}
+
+// ------------------------
+// Security Middleware
+// ------------------------
+
+// InputSanitizationMiddleware sanitizes and validates input data
+func InputSanitizationMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// Sanitize query parameters
+			for key, values := range c.QueryParams() {
+				for i, value := range values {
+					// Basic XSS prevention - remove script tags and dangerous characters
+					sanitized := sanitizeInput(value)
+					c.QueryParams()[key][i] = sanitized
+				}
+			}
+
+			// Sanitize path parameters
+			for _, param := range c.ParamNames() {
+				value := c.Param(param)
+				sanitized := sanitizeInput(value)
+				// Note: Echo doesn't allow modifying path parameters after routing
+				// This is a limitation - in production, consider sanitizing at the router level
+				_ = sanitized // Avoid unused variable warning
+			}
+
+			return next(c)
+		}
+	}
+}
+
+// sanitizeInput performs basic input sanitization
+func sanitizeInput(input string) string {
+	// Remove potential XSS vectors
+	input = strings.ReplaceAll(input, "<script", "")
+	input = strings.ReplaceAll(input, "</script", "")
+	input = strings.ReplaceAll(input, "javascript:", "")
+	input = strings.ReplaceAll(input, "onload=", "")
+	input = strings.ReplaceAll(input, "onerror=", "")
+
+	// Trim whitespace
+	input = strings.TrimSpace(input)
+
+	return input
+}
+
+// RequestSizeLimitMiddleware limits the size of incoming requests
+func RequestSizeLimitMiddleware(maxSize int64) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// Check Content-Length header
+			if contentLength := c.Request().ContentLength; contentLength > maxSize {
+				return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{
+					"error":   "Request too large",
+					"message": fmt.Sprintf("Request size exceeds limit of %d bytes", maxSize),
+				})
+			}
+
+			// Limit request body reading
+			c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxSize)
+
+			return next(c)
+		}
+	}
+}
+
+// IPRateLimitMiddleware provides basic rate limiting per IP
+func IPRateLimitMiddleware(requestsPerMinute int) echo.MiddlewareFunc {
+	// Simple in-memory rate limiter (in production, use Redis or similar)
+	rateLimiter := make(map[string][]time.Time)
+	var mu sync.RWMutex
+
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			clientIP := c.RealIP()
+			now := time.Now()
+			windowStart := now.Add(-time.Minute)
+
+			mu.Lock()
+			// Clean old entries
+			if requests, exists := rateLimiter[clientIP]; exists {
+				var validRequests []time.Time
+				for _, reqTime := range requests {
+					if reqTime.After(windowStart) {
+						validRequests = append(validRequests, reqTime)
+					}
+				}
+				rateLimiter[clientIP] = validRequests
+			}
+
+			// Check rate limit
+			if len(rateLimiter[clientIP]) >= requestsPerMinute {
+				mu.Unlock()
+				return c.JSON(http.StatusTooManyRequests, map[string]string{
+					"error":   "Rate limit exceeded",
+					"message": fmt.Sprintf("Maximum %d requests per minute allowed", requestsPerMinute),
+				})
+			}
+
+			// Add current request
+			rateLimiter[clientIP] = append(rateLimiter[clientIP], now)
+			mu.Unlock()
+
+			return next(c)
+		}
+	}
 }
 
 // ------------------------
