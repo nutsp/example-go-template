@@ -15,6 +15,7 @@ import (
 	httpTransport "example-api-template/internal/transport/http"
 	"example-api-template/internal/transport/mq"
 	"example-api-template/internal/usecase"
+	"example-api-template/pkg/database"
 	"example-api-template/pkg/logger"
 	"example-api-template/pkg/validator"
 
@@ -73,6 +74,7 @@ type Dependencies struct {
 	Validator   validator.Validator
 	Handler     *httpTransport.ExampleHandler
 	Producer    mq.ExampleProducer
+	DBConn      *database.PostgreSQLConnection // Optional, only for PostgreSQL
 }
 
 // initializeDependencies initializes all application dependencies
@@ -82,13 +84,48 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 
 	// Initialize repository
 	var repo repository.ExampleRepository
+	var dbConn *database.PostgreSQLConnection
+	var err error
+
 	switch cfg.Database.Type {
 	case "memory":
 		repo = repository.NewInMemoryExampleRepository()
 		logger.Info("Using in-memory repository")
+	case "postgres", "postgresql":
+		// Initialize PostgreSQL connection
+		dbConn, err = database.NewPostgreSQLConnection(&cfg.Database, logger)
+		if err != nil {
+			logger.Error("Failed to connect to PostgreSQL, falling back to in-memory repository", zap.Error(err))
+			repo = repository.NewInMemoryExampleRepository()
+		} else {
+			// Run health check
+			if err := dbConn.HealthCheck(); err != nil {
+				logger.Error("PostgreSQL health check failed, falling back to in-memory repository", zap.Error(err))
+				dbConn.Close()
+				dbConn = nil
+				repo = repository.NewInMemoryExampleRepository()
+			} else {
+				// Create PostgreSQL repository
+				pgRepo := repository.NewPostgreSQLExampleRepository(dbConn.DB)
+
+				// Run migrations
+				if err := pgRepo.AutoMigrate(); err != nil {
+					logger.Error("Database migration failed, falling back to in-memory repository", zap.Error(err))
+					dbConn.Close()
+					dbConn = nil
+					repo = repository.NewInMemoryExampleRepository()
+				} else {
+					repo = pgRepo
+					logger.Info("Using PostgreSQL repository",
+						zap.String("host", cfg.Database.Host),
+						zap.Int("port", cfg.Database.Port),
+						zap.String("database", cfg.Database.Name),
+					)
+				}
+			}
+		}
 	default:
-		// In a real application, you would initialize database connections here
-		// For now, fall back to in-memory
+		// Unsupported database type, fall back to in-memory
 		repo = repository.NewInMemoryExampleRepository()
 		logger.Warn("Unsupported database type, falling back to in-memory repository",
 			zap.String("type", cfg.Database.Type))
@@ -157,6 +194,7 @@ func initializeDependencies(cfg *config.Config, logger *logger.Logger) (*Depende
 		Validator:   validator,
 		Handler:     handler,
 		Producer:    producer,
+		DBConn:      dbConn,
 	}, nil
 }
 
@@ -280,6 +318,15 @@ func startServer(e *echo.Echo, cfg *config.Config, logger *logger.Logger, deps *
 	<-quit
 
 	logger.Info("Shutting down server...")
+
+	// Close database connection
+	if deps.DBConn != nil {
+		if err := deps.DBConn.Close(); err != nil {
+			logger.Error("Failed to close database connection", zap.Error(err))
+		} else {
+			logger.Info("Database connection closed")
+		}
+	}
 
 	// Close message queue producer
 	if err := deps.Producer.Close(); err != nil {

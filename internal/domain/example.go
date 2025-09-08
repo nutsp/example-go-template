@@ -9,12 +9,12 @@ import (
 
 // Example represents the core business entity
 type Example struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Age       int       `json:"age"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string    `json:"id" gorm:"primaryKey;size:255"`
+	Name      string    `json:"name" gorm:"size:255;not null;index"`
+	Email     string    `json:"email" gorm:"size:255;not null;unique;index"`
+	Age       int       `json:"age" gorm:"not null"`
+	CreatedAt time.Time `json:"created_at" gorm:"not null"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"not null"`
 }
 
 // NewExample creates a new Example entity with validation
@@ -32,6 +32,11 @@ func NewExample(id, name, email string, age int) (*Example, error) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
+}
+
+// TableName returns the table name for GORM
+func (Example) TableName() string {
+	return "examples"
 }
 
 // Update updates the example entity with validation

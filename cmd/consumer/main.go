@@ -12,6 +12,7 @@ import (
 	"example-api-template/internal/service"
 	"example-api-template/internal/transport/mq"
 	"example-api-template/internal/usecase"
+	"example-api-template/pkg/database"
 	"example-api-template/pkg/logger"
 
 	"go.uber.org/zap"
@@ -75,6 +76,15 @@ func main() {
 		appLogger.Info("Consumer stopped gracefully")
 	}
 
+	// Close database connection
+	if deps.DBConn != nil {
+		if err := deps.DBConn.Close(); err != nil {
+			appLogger.Error("Failed to close database connection", zap.Error(err))
+		} else {
+			appLogger.Info("Database connection closed")
+		}
+	}
+
 	appLogger.Info("Consumer shutdown complete")
 }
 
@@ -85,19 +95,55 @@ type ConsumerDependencies struct {
 	Service     service.ExampleService
 	UseCase     usecase.ExampleUseCase
 	Consumer    mq.ExampleConsumer
+	DBConn      *database.PostgreSQLConnection // Optional, only for PostgreSQL
 }
 
 // initializeConsumerDependencies initializes all dependencies needed for the consumer
 func initializeConsumerDependencies(cfg *config.Config, logger *logger.Logger) (*ConsumerDependencies, error) {
 	// Initialize repository (needed for event handlers that might need to fetch data)
 	var repo repository.ExampleRepository
+	var dbConn *database.PostgreSQLConnection
+	var err error
+
 	switch cfg.Database.Type {
 	case "memory":
 		repo = repository.NewInMemoryExampleRepository()
 		logger.Info("Using in-memory repository for consumer")
+	case "postgres", "postgresql":
+		// Initialize PostgreSQL connection
+		dbConn, err = database.NewPostgreSQLConnection(&cfg.Database, logger)
+		if err != nil {
+			logger.Error("Failed to connect to PostgreSQL, falling back to in-memory repository", zap.Error(err))
+			repo = repository.NewInMemoryExampleRepository()
+		} else {
+			// Run health check
+			if err := dbConn.HealthCheck(); err != nil {
+				logger.Error("PostgreSQL health check failed, falling back to in-memory repository", zap.Error(err))
+				dbConn.Close()
+				dbConn = nil
+				repo = repository.NewInMemoryExampleRepository()
+			} else {
+				// Create PostgreSQL repository
+				pgRepo := repository.NewPostgreSQLExampleRepository(dbConn.DB)
+
+				// Run migrations (consumer might start before server)
+				if err := pgRepo.AutoMigrate(); err != nil {
+					logger.Error("Database migration failed, falling back to in-memory repository", zap.Error(err))
+					dbConn.Close()
+					dbConn = nil
+					repo = repository.NewInMemoryExampleRepository()
+				} else {
+					repo = pgRepo
+					logger.Info("Using PostgreSQL repository for consumer",
+						zap.String("host", cfg.Database.Host),
+						zap.Int("port", cfg.Database.Port),
+						zap.String("database", cfg.Database.Name),
+					)
+				}
+			}
+		}
 	default:
-		// In a real application, you would initialize database connections here
-		// For now, fall back to in-memory
+		// Unsupported database type, fall back to in-memory
 		repo = repository.NewInMemoryExampleRepository()
 		logger.Warn("Unsupported database type, falling back to in-memory repository",
 			zap.String("type", cfg.Database.Type))
@@ -164,6 +210,7 @@ func initializeConsumerDependencies(cfg *config.Config, logger *logger.Logger) (
 		Service:     svc,
 		UseCase:     uc,
 		Consumer:    consumer,
+		DBConn:      dbConn,
 	}, nil
 }
 

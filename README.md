@@ -47,6 +47,7 @@ example-api-template/
 ### Core Functionality
 - **CRUD Operations**: Complete Create, Read, Update, Delete operations for Example entities
 - **Business Logic**: Name validation, email uniqueness, age restrictions, corporate/VIP domain rules
+- **Database Support**: In-memory and PostgreSQL repositories with GORM ORM
 - **External API Integration**: Validation, enrichment, and notification services
 - **Message Queue Integration**: Asynchronous event publishing and consumption with RabbitMQ
 - **Pagination**: Efficient list operations with limit/offset pagination
@@ -138,8 +139,9 @@ The service includes both embedded and standalone consumer options:
 
 ### Prerequisites
 - Go 1.21 or higher
+- PostgreSQL (optional, will use in-memory by default)
+- RabbitMQ (optional, will use mock by default)
 - Git
-- RabbitMQ (optional - mock implementation available)
 
 ### Installation
 
@@ -154,7 +156,22 @@ The service includes both embedded and standalone consumer options:
    go mod tidy
    ```
 
-3. **Optional: Start RabbitMQ** (skip if using mock)
+3. **Optional: Start PostgreSQL** (skip if using in-memory)
+   ```bash
+   # Using Docker
+   docker run -d --name postgres \
+     -e POSTGRES_DB=example_db \
+     -e POSTGRES_USER=postgres \
+     -e POSTGRES_PASSWORD=password \
+     -p 5432:5432 postgres:15
+   
+   # Or using Homebrew on macOS
+   brew install postgresql@15
+   brew services start postgresql@15
+   createdb example_db
+   ```
+
+4. **Optional: Start RabbitMQ** (skip if using mock)
    ```bash
    # Using Docker
    docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
@@ -164,7 +181,7 @@ The service includes both embedded and standalone consumer options:
    brew services start rabbitmq
    ```
 
-4. **Run the applications**
+5. **Run the applications**
    
    **Option A: Run server only (with mock consumer)**
    ```bash
@@ -178,6 +195,21 @@ The service includes both embedded and standalone consumer options:
    
    # Terminal 2: Start the message queue consumer
    go run cmd/consumer/main.go
+   ```
+
+   **Option C: Run with PostgreSQL**
+   ```bash
+   # Set database configuration
+   export DB_TYPE=postgres
+   export DB_HOST=localhost
+   export DB_PORT=5432
+   export DB_NAME=example_db
+   export DB_USERNAME=postgres
+   export DB_PASSWORD=password
+   
+   # Start applications
+   go run cmd/server/main.go     # Terminal 1
+   go run cmd/consumer/main.go   # Terminal 2
    ```
 
 The server will start on `http://localhost:8080` and the consumer will process events from the message queue
@@ -212,6 +244,20 @@ EXTERNAL_API_ENABLE_MOCK=true        # Use mock external API (default: true)
 EXTERNAL_API_MOCK_DELAY=100ms        # Mock API delay (default: 100ms)
 EXTERNAL_API_MOCK_SHOULD_FAIL=false  # Make mock API fail (default: false)
 EXTERNAL_API_TIMEOUT=30s             # External API timeout (default: 30s)
+```
+
+#### Database Configuration
+```bash
+DB_TYPE=memory                    # Database type: memory, postgres (default: memory)
+DB_HOST=localhost                 # PostgreSQL host (default: localhost)
+DB_PORT=5432                      # PostgreSQL port (default: 5432)
+DB_NAME=example_db                # Database name (default: example_db)
+DB_USERNAME=postgres              # Database username (default: empty)
+DB_PASSWORD=password              # Database password (default: empty)
+DB_SSL_MODE=disable               # SSL mode: disable, require, verify-ca, verify-full (default: disable)
+DB_MAX_CONNECTIONS=25             # Maximum open connections (default: 25)
+DB_MAX_IDLE_CONNS=5               # Maximum idle connections (default: 5)
+DB_CONN_MAX_LIFETIME=5m           # Connection max lifetime (default: 5m)
 ```
 
 #### Message Queue Configuration
